@@ -5,9 +5,11 @@
  *      Author: wilbert
  */
 
-#define MINDIF (10) // ADC should differ at least
+#define MINDIF (2) // ADC should differ at least
 
 #include <avr/io.h>
+#include <avr/interrupt.h>
+
 
 void setupPWM() {
 	// Attempting to generate pwm with
@@ -33,13 +35,16 @@ void setupPWM() {
 	TCCR1 = TCCR1 & ~(1 << COM1A1) | (1 << COM1A0);
 
 	// - Set compare value for OCR1A
-	OCR1A = 0;
+	OCR1A = 10;
 
 	// - Ensure OC1B toggles on compare
-	GTCCR = GTCCR & ~(1 << COM1B1) | (1 << COM1B0);
+	//GTCCR = GTCCR & ~(1 << COM1B1) | (1 << COM1B0);
 
 	// - Set compare value for OCR1B
 	OCR1B = 0;
+
+	// Enable interrupt on OCR1B compare
+	TIMSK = TIMSK | (1<<OCIE1B);
 
 	// Start timer, prescaler 16
 	TCCR1 = TCCR1 & 0xf0 | 0x02;
@@ -78,8 +83,14 @@ static void setPWM(uint16_t phase)
 	// into an offset for the two
 	// pwm signals.
 
-	float dc = phase/1024.0;
+	// Due to the analogue circuit, the max
+	// output shall never exceed 3.3 * 10/13
+	// = 2.53V
+
+	float dc = phase/790.0;
 	dc = dc*250;
+	if (dc>=250)
+		dc = 249;
 	uint8_t newcompare = (uint8_t)dc;
 	uint8_t oldcompare = OCR1B;
 
@@ -109,10 +120,29 @@ int main(void)
 	setupPWM();
 	setupADC();
 
+	sei();
 	while(1) {
 		setPWM(adcIn);
 		getADC(&adcIn);
 	}
 }
 
+ISR(TIM1_COMPB_vect)
+{
+//	static uint8_t even = 1;
+
+//	even= 1-even;
+
+//	if (even==0) {
+		// Force
+		uint8_t v = PINB & (1<<PINB1);
+		if (v) {
+			PORTB = PORTB |  (1<<PORTB4);
+		}
+		else {
+			PORTB = PORTB & ~(1<<PORTB4);
+
+		}
+//	}
+}
 
