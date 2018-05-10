@@ -5,9 +5,14 @@
  *      Author: wilbert
  */
 
-#define MINDIF (10) // ADC should differ at least
+#define MINDIF (2) // ADC should differ at least
 
 #include <avr/io.h>
+#include <avr/interrupt.h>
+
+uint16_t adcIn = 0;
+
+
 
 void setupPWM() {
 	// Attempting to generate pwm with
@@ -33,15 +38,18 @@ void setupPWM() {
 	TCCR1 = TCCR1 & ~(1 << COM1A1) | (1 << COM1A0);
 
 	// - Set compare value for OCR1A
-	OCR1A = 0;
+	OCR1A = 10;
 
 	// - Ensure OC1B toggles on compare
-	GTCCR = GTCCR & ~(1 << COM1B1) | (1 << COM1B0);
+	//GTCCR = GTCCR & ~(1 << COM1B1) | (1 << COM1B0);
 
 	// - Set compare value for OCR1B
 	OCR1B = 0;
 
-	// Start timer, prescaler 16
+	// Enable interrupt on OCR1B and OCR1A compare
+	TIMSK = TIMSK | (1<<OCIE1B) | (1<<OCIE1A);
+
+	// Start timer, prescaler 128
 	TCCR1 = TCCR1 & 0xf0 | 0x02;
 }
 
@@ -71,15 +79,20 @@ static void setupADC()
 	ADCSRA = ADCSRA | (1<<ADEN);
 }
 
-static void setPWM(uint16_t phase)
+static void setPWM()
 {
 	// phase is to be interpreted as a
 	// 10 bit number. This is to be translated
 	// into an offset for the two
 	// pwm signals.
 
-	float dc = phase/1024.0;
-	dc = dc*250;
+	uint8_t dc;
+
+	dc = (uint8_t)((uint16_t)256-adcIn/4);
+	if (dc>=250)
+		dc = 249;
+
+
 	uint8_t newcompare = (uint8_t)dc;
 	uint8_t oldcompare = OCR1B;
 
@@ -90,7 +103,7 @@ static void setPWM(uint16_t phase)
 }
 
 
-static void getADC(uint16_t* adc)
+static void getADC()
 {
 	// Start ADC
 	ADCSRA = ADCSRA | (1<<ADSC);
@@ -99,20 +112,48 @@ static void getADC(uint16_t* adc)
 	while (ADCSRA & (1<<ADSC));
 
 	// Capture result
-	*adc=ADC;
+	adcIn=ADC;
 }
+
 
 int main(void)
 {
-	uint16_t adcIn = 0;
-
 	setupPWM();
 	setupADC();
 
+	sei();
 	while(1) {
-		setPWM(adcIn);
-		getADC(&adcIn);
+		getADC();
 	}
 }
 
+ISR(TIM1_COMPA_vect)
+{
+	// On compare match of A ensure that B4 equals B1
+
+	uint8_t b1 = PINB & (1<<PORTB1);
+
+	if (b1==0) {
+		PORTB = (PORTB & ~(1<<PORTB4));
+	}
+	else {
+		PORTB = (PORTB | (1<<PORTB4));
+	}
+
+}
+
+ISR(TIM1_COMPB_vect)
+{
+	// On compare match of b ensure that B4 equals not B1
+
+	uint8_t b1 = PINB & (1<<PORTB1);
+
+	if (b1==0) {
+		PORTB = (PORTB | (1<<PORTB4));
+	}
+	else {
+		PORTB = (PORTB & ~(1<<PORTB4));
+	}
+	setPWM();
+}
 
