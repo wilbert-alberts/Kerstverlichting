@@ -19,61 +19,20 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 
-static uint16_t adcIn = 0;
 static uint8_t pwm = 0;
 
 void setupPWM() {
-	// Attempting to generate pwm with
-	// 50% dutycycle and 1Khz frequency.
-	// By using toggle operation on output
-	// pins two timer periods are needed
-	// for one dutycycle period.
-	// Prescaler set to 1, cpu running on 8Mhz
-	// Counting to 250 lasts 250 us
-	// So one period is 500 us.
-	// PWM frequency 2 Khz.
 
 	// Set OC0B (PB1)as output pins.
 	DDRB = DDRB | (1 << DDB1);
 
-	// - Ensure OC0B toggles on compare
-	TCCR0A = TCCR0A & ~((1 << COM0B1) | (1 << COM0B0));
-	TCCR0A = TCCR0A | (1 << COM0B0);
-
-	// - Ensure clear on timer compare
-	TCCR0A = TCCR0A & ~((1 << WGM01) | (1 << WGM00));
-	TCCR0B = TCCR0B & ~(1 << WGM02);
-
-	TCCR0A = TCCR0A | (1 << WGM01);
-
-	// - Count to 250
-	OCR0B = 250;
-
-	// Enable interrupt on OCR0B compare
-	TIMSK = TIMSK | (1 << OCIE0B);
-
 	// Set OC1B (PB4) as output pins.
 	DDRB = DDRB | (1 << DDB4);
 
-	// - Ensure OC1B toggles on compare
-	GTCCR = GTCCR & ~((1 << COM1B1) | (1 << COM1B0));
-	GTCCR = GTCCR | (1 << COM1B0);
+	// Start timer 1, clock: 8Mhz, prescaler 32
+	// Timer 1 will be running with frequency of 256 Hz
+	TCCR1 = (TCCR1 & 0xf0) | (1<<CS13);
 
-	// - Ensure clear on timer compare
-	GTCCR = GTCCR | (1 << CTC1);
-
-	// - Count to 250
-	OCR1B = 250;
-	OCR1C = 250;
-
-	// Enable interrupt on OCR0B compare
-	TIMSK = TIMSK | (1 << OCIE1B);
-
-	// Start timer 0, clock: 8 Mhz, prescaler 1
-	TCCR0B = (TCCR1 & 0xf8) | 0x01;
-
-	// Start timer 1, clock: 8Mhz, prescaler 1
-	TCCR1 = (TCCR1 & 0xf0) | 0x01;
 }
 
 static void setupADC() {
@@ -90,39 +49,43 @@ static void setupADC() {
 	ADCSRA = ADCSRA | (1 << ADEN);
 }
 
-static void getADC()
-{
-	float f;
+
+int main(void) {
+	volatile uint8_t cnt;
+	volatile uint8_t scnt;
+	setupPWM();
+	setupADC();
 
 	// Start ADC
 	ADCSRA = ADCSRA | (1 << ADSC);
 
-	// While not ready, wait
-	while (ADCSRA & (1 << ADSC))
-		;
-
-	// Capture result
-	adcIn = ADC;
-
-	// Determine PWM
-	f = adcIn / 1024.0;
-	pwm = 250 * f;
-}
-
-int main(void) {
-	setupPWM();
-	setupADC();
-
 	sei();
 	while (1) {
-		getADC();
+		if (~(ADCSRA & (1 << ADSC))) {
+			// ADC finished
+			pwm = ADC/8;
+			// Start ADC
+			ADCSRA = ADCSRA | (1 << ADSC);
+		}
+
+		cnt = TCNT1;
+		scnt = cnt + pwm;
+		if (cnt<128) {
+			PORTB = PORTB & ~(1<<PORTB1);
+		}
+		else {
+			PORTB = PORTB | (1<<PORTB1);
+
+		}
+		if (scnt<128) {
+			PORTB = PORTB & ~(1<<PORTB4);
+		}
+		else {
+			PORTB = PORTB | (1<<PORTB4);
+
+		}
+
 	}
 }
 
-ISR(TIM1_COMPA_vect) {
-}
-
-ISR(TIM1_COMPB_vect) {
-	TCNT0 = pwm;
-}
 
